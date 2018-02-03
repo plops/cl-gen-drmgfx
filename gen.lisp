@@ -109,7 +109,7 @@ is replaced with replacement."
 			      (let ((res :init  (funcall drmModeGetResources fd)))
 				(funcall assert res)
 				(let ((c :type drmModeConnectorPtr :init nullptr))
-				 (dotimes (i res->count_connectors)
+				 (dotimes (i (funcall "static_cast<unsigned int>" res->count_connectors))
 				   (setf c  (funcall drmModeGetConnector fd (aref res->connectors i)))
 				   (funcall assert c)
 				   (if (== DRM_MODE_CONNECTED
@@ -133,12 +133,40 @@ is replaced with replacement."
 				   (let ((has_dumb :type uint64_t :init 0))
 				     (funcall assert (! (funcall drmGetCap fd DRM_CAP_DUMB_BUFFER &has_dumb)))
 				     (funcall assert has_dumb))
-				   (let ((creq :type "struct drm_mode_create_dumb"
-					       :init (list .width=fb->width
-							   .height=fb->height
-							   .bpp=fb->bpp)))
+				   (let ((creq :type "struct drm_mode_create_dumb"))
+				     (funcall memset &creq 0 (funcall sizeof creq))
+				     (setf creq.width fb->width
+					   creq.height fb->height
+					   creq.bpp fb->bpp)
 				     (funcall assert (! (funcall drmIoctl fd DRM_IOCTL_MODE_CREATE_DUMB &creq)))
-				     )))))
+				     (macroexpand (e "width=" creq.width " height=" creq.height))
+				     (let ((my_fb :type uint32_t :init 0))
+				       (funcall assert
+						(! (funcall drmModeAddFB fd creq.width creq.height 24
+							    creq.bpp creq.pitch creq.handle &my_fb)))
+				       (let ((mreq :type "struct drm_mode_map_dumb"))
+					 (funcall memset &mreq 0 (funcall sizeof mreq))
+					 (setf mreq.handle creq.handle)
+					 (funcall assert (! (funcall drmIoctl fd DRM_IOCTL_MODE_MAP_DUMB &mreq)))
+					 (let ((map :type uint32_t*
+						    :init (funcall static_cast<uint32_t*> (funcall mmap 0 creq.size
+								    (\| PROT_READ PROT_WRITE)
+								    MAP_SHARED fd mreq.offset))))
+					   (funcall assert (!= MAP_FAILED map))
+					   (funcall memset map 0 creq.size)
+
+					   (dotimes (i 256)
+					     (dotimes (j 256)
+					       (setf (aref map (+ j (* i (>> creq.pitch 2))))
+						     (hex #x12345678))))
+					   (funcall assert (! (funcall drmModeSetCrtc fd crtc->crtc_id my_fb
+								       0 0 &c->connector_id 1 &crtc->mode)))
+					   (funcall sleep 10)
+					   (funcall assert (! (funcall drmModeSetCrtc fd crtc->crtc_id fb->fb_id
+								       0 0 &c->connector_id 1 &crtc->mode)))
+					   (funcall assert (! (funcall drmModeRmFB fd my_fb))))))
+				     )
+				   ))))
 			    
 			    
 			    
