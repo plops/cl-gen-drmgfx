@@ -120,16 +120,19 @@ is replaced with replacement."
 				       (crtc :init (funcall drmModeGetCrtc fd enc->crtc_id))
 				       (fb :init (funcall drmModeGetFB fd crtc->buffer_id))
 				       (plane_res :init (funcall drmModeGetPlaneResources fd))
-				       (plane :type drmModePlanePtr :init nullptr))
+				       (plane  :init (paren-list
+				    (let ((p :type drmModePlanePtr :init nullptr))
+				     (dotimes (i plane_res->count_planes)
+				       (setf p (funcall drmModeGetPlane fd (aref plane_res->planes i)))
+				       (funcall assert p)
+				       (if (== p->fb_id fb->fb_id)
+					   (break))
+				       (funcall drmFree p))
+				     (raw "p")))))
 				   (statements
 				     ,@(loop for e in '(enc crtc fb plane_res) collect
 					    `(funcall assert ,e)))
-				   (dotimes (i plane_res->count_planes)
-				     (setf plane (funcall drmModeGetPlane fd (aref plane_res->planes i)))
-				     (funcall assert plane)
-				     (if (== plane->fb_id fb->fb_id)
-					 (break))
-				     (funcall drmFree plane))
+				   
 				   (let ((has_dumb :type uint64_t :init 0))
 				     (funcall assert (! (funcall drmGetCap fd DRM_CAP_DUMB_BUFFER &has_dumb)))
 				     (funcall assert has_dumb))
