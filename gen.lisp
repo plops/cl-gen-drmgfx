@@ -153,7 +153,7 @@ is replaced with replacement."
 								    (\| PROT_READ PROT_WRITE)
 								    MAP_SHARED fd mreq.offset))))
 					   (funcall assert (!= MAP_FAILED map))
-					   (funcall memset map 0 creq.size)
+					    (funcall memset map 0 creq.size)
 
 					   (dotimes (i 256)
 					     (dotimes (j 256)
@@ -164,9 +164,15 @@ is replaced with replacement."
 					   (funcall sleep 10)
 					   (funcall assert (! (funcall drmModeSetCrtc fd crtc->crtc_id fb->fb_id
 								       0 0 &c->connector_id 1 &crtc->mode)))
-					   (funcall assert (! (funcall drmModeRmFB fd my_fb))))))
-				     )
-				   ))))
+					   (funcall assert (! (funcall drmModeRmFB fd my_fb)))
+					   (let ((dreq :type "struct drm_mode_destroy_dumb"))
+					     (funcall memset &dreq 0 (funcall sizeof dreq))
+					     (setf dreq.handle creq.handle)
+					     (funcall assert (! (funcall drmIoctl fd DRM_IOCTL_MODE_DESTROY_DUMB &dreq))))
+					   (statements
+					    ,@(loop for e in '(plane plane_res fb crtc enc c res) collect
+						   `(funcall drmFree ,e)))
+					   (funcall drmClose fd)))))))))
 			    
 			    
 			    
