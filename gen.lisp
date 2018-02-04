@@ -61,6 +61,7 @@ is replaced with replacement."
 		  (include <iostream>)
 		  (include <cassert>)
 		  (include <cstdlib>)
+		  (include <errno.h>)
 		  (include <cstring>)
 		  (include <sys/mman.h>)
 		  (include <unistd.h>)
@@ -68,6 +69,7 @@ is replaced with replacement."
 		  (raw " ")
 		  (include <xf86drm.h>)
 		  (include <xf86drmMode.h>)
+		  (include <i915_drm.h>)
 
 		  (raw "//! This repository contains a minimal program to draw to a linux screen.")
 		  (raw "//! \\section Dependencies ")
@@ -100,12 +102,14 @@ is replaced with replacement."
 			    (if (== 0 (funcall drmAvailable))
 				(macroexpand (er "drm not available")))
 			    
-			    (let ((fd :init (paren-list (let ((fd :init (funcall drmOpen (string "i915") nullptr)))
+			    (let ((errno :type
+				    "extern int")
+				  (fd :init (paren-list (let ((fd :init (funcall drmOpen (string "i915") nullptr)))
 							  (if (< fd 0)
-							      (macroexpand (er "drmOpen error: " fd)))
+							      (macroexpand (er "drmOpen error: fd=" fd " errno=" errno)))
 							  (let ((rr :init (funcall drmSetClientCap fd DRM_CLIENT_CAP_UNIVERSAL_PLANES 1)))
 							    (if (!= 0 rr)
-								(macroexpand (er "drmSetClientCap error: " rr))))
+								(macroexpand (er "drmSetClientCap error: " rr " errno=" errno))))
 							  (raw "fd"))))
 				  (res :init  (paren-list (let ((r :init (funcall drmModeGetResources fd)))
 							    (funcall assert r)
@@ -159,6 +163,22 @@ is replaced with replacement."
 									 creq.bpp creq.pitch creq.handle &my_fb)))
 						    (raw
 						     "my_fb"))))
+				  (flip :init (paren-list
+					       (let ((gp :type "struct drm_i915_getparam"
+							 )
+						     (value :type int))
+						 (funcall memset &gp 0 (funcall sizeof gp))
+						 (setf gp.param I915_PARAM_HAS_PAGEFLIPPING
+						       gp.value &value)
+						 (let ((r :init (funcall drmCommandWriteRead fd DRM_I915_GETPARAM
+									 &gp (funcall sizeof gp))))
+						   (if r
+						       (macroexpand (er
+
+								      "i915_getparam " r))))
+						 (macroexpand (e
+								"flipping=" *gp.value))
+						 (raw "*gp.value"))))
 				  (mreq :init (paren-list
 					       (let ((mreq :type "struct drm_mode_map_dumb"))
 						 (funcall memset &mreq 0 (funcall sizeof mreq))
@@ -182,7 +202,14 @@ is replaced with replacement."
 					(hex #x12345678))))
 			      (funcall assert (! (funcall drmModeSetCrtc fd crtc->crtc_id my_fb
 							  0 0 &c->connector_id 1 &crtc->mode)))
-			      (funcall sleep 10)
+			      (dotimes (k 256)
+			       (dotimes (i creq.height)
+				 (dotimes (j creq.width)
+				   (setf (aref map (+ j (* i (>> creq.pitch 2))))
+					 (+ k (hex #x12345678)))))
+			       (funcall usleep 32000))
+
+			      #+nil (funcall sleep 1)
 			      (funcall assert (! (funcall drmModeSetCrtc fd crtc->crtc_id fb->fb_id
 							  0 0 &c->connector_id 1 &crtc->mode)))
 			      (funcall assert (! (funcall drmModeRmFB fd my_fb)))
@@ -193,8 +220,8 @@ is replaced with replacement."
 			      (statements
 			       ,@(loop for e in '(plane plane_res fb crtc enc c res) collect
 				      `(funcall drmFree ,e)))
-			      (funcall drmClose fd)
-			      )
+			      (funcall drmClose fd))
+			    
 			    
 			    
 			    

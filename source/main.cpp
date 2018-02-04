@@ -2,10 +2,12 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <errno.h>
 #include <iostream>
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <i915_drm.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 //! This repository contains a minimal program to draw to a linux screen.
@@ -36,15 +38,18 @@ int main(int argc, char **argv) {
     (std::cerr << "drm not available" << std::endl);
   }
   {
+    extern int errno;
     auto fd = ({
       auto fd = drmOpen("i915", nullptr);
       if ((fd < 0)) {
-        (std::cerr << "drmOpen error: " << fd << std::endl);
+        (std::cerr << "drmOpen error: fd=" << fd << " errno=" << errno
+                   << std::endl);
       }
       {
         auto rr = drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
         if ((0 != rr)) {
-          (std::cerr << "drmSetClientCap error: " << rr << std::endl);
+          (std::cerr << "drmSetClientCap error: " << rr << " errno=" << errno
+                     << std::endl);
         }
       }
       fd;
@@ -110,6 +115,21 @@ int main(int argc, char **argv) {
                              creq.pitch, creq.handle, &my_fb))));
       my_fb;
     });
+    auto flip = ({
+      struct drm_i915_getparam gp;
+      int value;
+      memset(&gp, 0, sizeof(gp));
+      gp.param = I915_PARAM_HAS_PAGEFLIPPING;
+      gp.value = &value;
+      {
+        auto r = drmCommandWriteRead(fd, DRM_I915_GETPARAM, &gp, sizeof(gp));
+        if (r) {
+          (std::cerr << "i915_getparam " << r << std::endl);
+        }
+      }
+      (std::cout << "flipping=" << *gp.value << std::endl);
+      *gp.value;
+    });
     auto mreq = ({
       struct drm_mode_map_dumb mreq;
       memset(&mreq, 0, sizeof(mreq));
@@ -131,7 +151,14 @@ int main(int argc, char **argv) {
     }
     assert((!(drmModeSetCrtc(fd, crtc->crtc_id, my_fb, 0, 0, &c->connector_id,
                              1, &crtc->mode))));
-    sleep(10);
+    for (unsigned int k = 0; (k < 256); k += 1) {
+      for (unsigned int i = 0; (i < creq.height); i += 1) {
+        for (unsigned int j = 0; (j < creq.width); j += 1) {
+          map[(j + (i * (creq.pitch >> 2)))] = (k + 0x12345678);
+        }
+      }
+      usleep(32000);
+    }
     assert((!(drmModeSetCrtc(fd, crtc->crtc_id, fb->fb_id, 0, 0,
                              &c->connector_id, 1, &crtc->mode))));
     assert((!(drmModeRmFB(fd, my_fb))));
